@@ -1,0 +1,431 @@
+{
+  "document": {
+    "schemaVersion": 1,
+    "system": "modular_exhibition",
+    "units": "mm",
+    "envelope": {
+      "width": 600,
+      "depth": 400,
+      "height": 1600
+    },
+    "module": 1000,
+    "walls": [
+      {
+        "edge": "back",
+        "bays": []
+      },
+      {
+        "edge": "left",
+        "bays": []
+      },
+      {
+        "edge": "right",
+        "bays": []
+      },
+      {
+        "edge": "front",
+        "bays": []
+      }
+    ],
+    "features": [],
+    "parts": [
+      {
+        "id": "left",
+        "name": "Left side",
+        "shape": "box",
+        "x": 0,
+        "y": 0,
+        "z": 0,
+        "width": 17,
+        "height": 1600,
+        "depth": 400,
+        "material": "paint",
+        "group": "hook-stand",
+        "face": "side",
+        "outline": [
+          [
+            0,
+            0
+          ],
+          [
+            400,
+            0
+          ],
+          [
+            400,
+            1600
+          ],
+          [
+            200,
+            1600
+          ],
+          [
+            0,
+            900
+          ]
+        ]
+      },
+      {
+        "id": "right",
+        "name": "Right side",
+        "shape": "box",
+        "x": 583,
+        "y": 0,
+        "z": 0,
+        "width": 17,
+        "height": 1600,
+        "depth": 400,
+        "material": "paint",
+        "group": "hook-stand",
+        "face": "side",
+        "outline": [
+          [
+            0,
+            0
+          ],
+          [
+            400,
+            0
+          ],
+          [
+            400,
+            1600
+          ],
+          [
+            200,
+            1600
+          ],
+          [
+            0,
+            900
+          ]
+        ]
+      },
+      {
+        "id": "back",
+        "name": "Back panel",
+        "shape": "box",
+        "x": 17,
+        "y": 0,
+        "z": 0,
+        "width": 566,
+        "height": 1600,
+        "depth": 17,
+        "material": "paint",
+        "group": "hook-stand"
+      },
+      {
+        "id": "base",
+        "name": "Base shelf",
+        "shape": "box",
+        "x": 17,
+        "y": 100,
+        "z": 17,
+        "width": 566,
+        "height": 17,
+        "depth": 383,
+        "material": "paint",
+        "group": "hook-stand"
+      },
+      {
+        "id": "plinth",
+        "name": "Plinth",
+        "shape": "box",
+        "x": 17,
+        "y": 0,
+        "z": 383,
+        "width": 566,
+        "height": 100,
+        "depth": 17,
+        "material": "paint",
+        "group": "hook-stand"
+      },
+      {
+        "id": "hook-1a",
+        "name": "Hook 15 cm row 1 a",
+        "shape": "box",
+        "kind": "equipment",
+        "material": "metal",
+        "x": 80,
+        "y": 1450,
+        "z": 17,
+        "width": 6,
+        "height": 40,
+        "depth": 150,
+        "group": "hook-stand"
+      },
+      {
+        "id": "hook-1b",
+        "name": "Hook 15 cm row 1 b",
+        "shape": "box",
+        "kind": "equipment",
+        "material": "metal",
+        "x": 215,
+        "y": 1450,
+        "z": 17,
+        "width": 6,
+        "height": 40,
+        "depth": 150,
+        "group": "hook-stand"
+      },
+      {
+        "id": "hook-1c",
+        "name": "Hook 15 cm row 1 c",
+        "shape": "box",
+        "kind": "equipment",
+        "material": "metal",
+        "x": 350,
+        "y": 1450,
+        "z": 17,
+        "width": 6,
+        "height": 40,
+        "depth": 150,
+        "group": "hook-stand"
+      },
+      {
+        "id": "hook-1d",
+        "name": "Hook 15 cm row 1 d",
+        "shape": "box",
+        "kind": "equipment",
+        "material": "metal",
+        "x": 485,
+        "y": 1450,
+        "z": 17,
+        "width": 6,
+        "height": 40,
+        "depth": 150,
+        "group": "hook-stand"
+      },
+      {
+        "id": "hook-2a",
+        "name": "Hook 15 cm row 2 a",
+        "shape": "box",
+        "kind": "equipment",
+        "material": "metal",
+        "x": 80,
+        "y": 1250,
+        "z": 17,
+        "width": 6,
+        "height": 40,
+        "depth": 150,
+        "group": "hook-stand"
+      },
+      {
+        "id": "hook-2b",
+        "name": "Hook 15 cm row 2 b",
+        "shape": "box",
+        "kind": "equipment",
+        "material": "metal",
+        "x": 215,
+        "y": 1250,
+        "z": 17,
+        "width": 6,
+        "height": 40,
+        "depth": 150,
+        "group": "hook-stand"
+      },
+      {
+        "id": "hook-2c",
+        "name": "Hook 15 cm row 2 c",
+        "shape": "box",
+        "kind": "equipment",
+        "material": "metal",
+        "x": 350,
+        "y": 1250,
+        "z": 17,
+        "width": 6,
+        "height": 40,
+        "depth": 150,
+        "group": "hook-stand"
+      },
+      {
+        "id": "hook-2d",
+        "name": "Hook 15 cm row 2 d",
+        "shape": "box",
+        "kind": "equipment",
+        "material": "metal",
+        "x": 485,
+        "y": 1250,
+        "z": 17,
+        "width": 6,
+        "height": 40,
+        "depth": 150,
+        "group": "hook-stand"
+      },
+      {
+        "id": "hook-3a",
+        "name": "Hook 30 cm row 3 a",
+        "shape": "box",
+        "kind": "equipment",
+        "material": "metal",
+        "x": 80,
+        "y": 1050,
+        "z": 17,
+        "width": 6,
+        "height": 40,
+        "depth": 300,
+        "group": "hook-stand"
+      },
+      {
+        "id": "hook-3b",
+        "name": "Hook 30 cm row 3 b",
+        "shape": "box",
+        "kind": "equipment",
+        "material": "metal",
+        "x": 215,
+        "y": 1050,
+        "z": 17,
+        "width": 6,
+        "height": 40,
+        "depth": 300,
+        "group": "hook-stand"
+      },
+      {
+        "id": "hook-3c",
+        "name": "Hook 30 cm row 3 c",
+        "shape": "box",
+        "kind": "equipment",
+        "material": "metal",
+        "x": 350,
+        "y": 1050,
+        "z": 17,
+        "width": 6,
+        "height": 40,
+        "depth": 300,
+        "group": "hook-stand"
+      },
+      {
+        "id": "hook-3d",
+        "name": "Hook 30 cm row 3 d",
+        "shape": "box",
+        "kind": "equipment",
+        "material": "metal",
+        "x": 485,
+        "y": 1050,
+        "z": 17,
+        "width": 6,
+        "height": 40,
+        "depth": 300,
+        "group": "hook-stand"
+      },
+      {
+        "id": "hook-4a",
+        "name": "Hook 30 cm row 4 a",
+        "shape": "box",
+        "kind": "equipment",
+        "material": "metal",
+        "x": 80,
+        "y": 850,
+        "z": 17,
+        "width": 6,
+        "height": 40,
+        "depth": 300,
+        "group": "hook-stand"
+      },
+      {
+        "id": "hook-4b",
+        "name": "Hook 30 cm row 4 b",
+        "shape": "box",
+        "kind": "equipment",
+        "material": "metal",
+        "x": 215,
+        "y": 850,
+        "z": 17,
+        "width": 6,
+        "height": 40,
+        "depth": 300,
+        "group": "hook-stand"
+      },
+      {
+        "id": "hook-4c",
+        "name": "Hook 30 cm row 4 c",
+        "shape": "box",
+        "kind": "equipment",
+        "material": "metal",
+        "x": 350,
+        "y": 850,
+        "z": 17,
+        "width": 6,
+        "height": 40,
+        "depth": 300,
+        "group": "hook-stand"
+      },
+      {
+        "id": "hook-4d",
+        "name": "Hook 30 cm row 4 d",
+        "shape": "box",
+        "kind": "equipment",
+        "material": "metal",
+        "x": 485,
+        "y": 850,
+        "z": 17,
+        "width": 6,
+        "height": 40,
+        "depth": 300,
+        "group": "hook-stand"
+      },
+      {
+        "id": "hook-5a",
+        "name": "Hook 30 cm row 5 a",
+        "shape": "box",
+        "kind": "equipment",
+        "material": "metal",
+        "x": 80,
+        "y": 650,
+        "z": 17,
+        "width": 6,
+        "height": 40,
+        "depth": 300,
+        "group": "hook-stand"
+      },
+      {
+        "id": "hook-5b",
+        "name": "Hook 30 cm row 5 b",
+        "shape": "box",
+        "kind": "equipment",
+        "material": "metal",
+        "x": 215,
+        "y": 650,
+        "z": 17,
+        "width": 6,
+        "height": 40,
+        "depth": 300,
+        "group": "hook-stand"
+      },
+      {
+        "id": "hook-5c",
+        "name": "Hook 30 cm row 5 c",
+        "shape": "box",
+        "kind": "equipment",
+        "material": "metal",
+        "x": 350,
+        "y": 650,
+        "z": 17,
+        "width": 6,
+        "height": 40,
+        "depth": 300,
+        "group": "hook-stand"
+      },
+      {
+        "id": "hook-5d",
+        "name": "Hook 30 cm row 5 d",
+        "shape": "box",
+        "kind": "equipment",
+        "material": "metal",
+        "x": 485,
+        "y": 650,
+        "z": 17,
+        "width": 6,
+        "height": 40,
+        "depth": 300,
+        "group": "hook-stand"
+      }
+    ],
+    "assembled": true,
+    "groups": {
+      "hook-stand": "Hook stand"
+    }
+  },
+  "brief": "Hook stand for a pharmacy. It carries blister packs about 100 mm wide, 180 mm high and 20 mm thick, hung on the hooks, about 8 packs per hook.",
+  "sourceKind": "description"
+}
