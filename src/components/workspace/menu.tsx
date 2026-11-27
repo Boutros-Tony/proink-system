@@ -87,6 +87,7 @@ export function Menu({
       placeMenu(anchor, panel, side, align);
     }
     function onScroll(event: Event) {
+      if (!panel) return;
       if (event.target instanceof Node && panel.contains(event.target)) return;
       place();
     }

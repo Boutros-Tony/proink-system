@@ -2,10 +2,6 @@ import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { jobFileCounts } from "./job-files";
 
-const FULL_QUOTES_FILE = ".archive/past-quotes.jsonl";
-const SAMPLE_QUOTES_FILE = ".archive/sample-20-low.jsonl";
-const SAMPLE_TEXT_FILE = ".archive/sample-20-input.jsonl";
-const FULL_TEXT_DIR = ".archive/grok/in";
 const SIGNATURE_FILE = /^(image|outlook)[-\w]*\.(png|jpe?g|gif)$/i;
 const JOB_TYPES = ["build", "print", "installation", "transport", "maintenance", "rental", "mixed", "other"] as const;
 
@@ -81,11 +77,9 @@ export function pastQuotesAvailable(): boolean {
   return quotesPath() !== null;
 }
 
-function quotesPath(): { file: string; full: boolean } | null {
-  const full = path.join(process.cwd(), FULL_QUOTES_FILE);
-  if (existsSync(full)) return { file: full, full: true };
-  const sample = path.join(process.cwd(), SAMPLE_QUOTES_FILE);
-  if (existsSync(sample)) return { file: sample, full: false };
+function quotesPath(): { name: string; full: boolean } | null {
+  if (existsSync(path.join(process.cwd(), ".archive", "past-quotes.jsonl"))) return { name: "past-quotes.jsonl", full: true };
+  if (existsSync(path.join(process.cwd(), ".archive", "sample-20-low.jsonl"))) return { name: "sample-20-low.jsonl", full: false };
   return null;
 }
 
@@ -222,16 +216,17 @@ let recordCache: { file: string; mtimeMs: number; records: unknown[] } | null = 
 function loadRecords(): unknown[] {
   const source = quotesPath();
   if (!source) return [];
+  const file = path.join(process.cwd(), ".archive", source.name);
   let mtimeMs: number;
   try {
-    mtimeMs = statSync(source.file).mtimeMs;
+    mtimeMs = statSync(path.join(process.cwd(), ".archive", source.name)).mtimeMs;
   } catch {
     return [];
   }
-  if (recordCache?.file === source.file && recordCache.mtimeMs === mtimeMs) return recordCache.records;
+  if (recordCache?.file === file && recordCache.mtimeMs === mtimeMs) return recordCache.records;
   let body: string;
   try {
-    body = readFileSync(source.file, "utf8");
+    body = readFileSync(path.join(process.cwd(), ".archive", source.name), "utf8");
   } catch {
     return [];
   }
@@ -249,7 +244,7 @@ function loadRecords(): unknown[] {
       continue;
     }
   }
-  recordCache = { file: source.file, mtimeMs, records };
+  recordCache = { file, mtimeMs, records };
   return records;
 }
 
@@ -269,13 +264,7 @@ function signatureImage(filename: string, type: string, bytes: number): boolean 
   return type.toLowerCase().startsWith("image/") && bytes < 40000;
 }
 
-function readTextFile(file: string): Map<string, string> {
-  let body: string;
-  try {
-    body = readFileSync(file, "utf8");
-  } catch {
-    return new Map();
-  }
+function textsFrom(body: string): Map<string, string> {
   const texts = new Map<string, string>();
   for (const line of body.split("\n")) {
     const trimmed = line.trim();
@@ -291,14 +280,14 @@ function readTextFile(file: string): Map<string, string> {
   return texts;
 }
 
-function batchTextFiles(dir: string): string[] {
+function batchTextNames(): string[] {
   let names: string[];
   try {
-    names = readdirSync(dir);
+    names = readdirSync(path.join(process.cwd(), ".archive", "grok", "in"));
   } catch {
     return [];
   }
-  return names.filter((name) => name.startsWith("batch-") && name.endsWith(".jsonl")).sort();
+  return names.filter((name) => /^batch-[^/\\]+\.jsonl$/.test(name)).sort();
 }
 
 let textCache: { key: string; texts: Map<string, string> } | null = null;
@@ -307,25 +296,29 @@ function loadTexts(): Map<string, string> {
   const source = quotesPath();
   if (!source) return new Map();
   if (!source.full) {
-    const file = path.join(process.cwd(), SAMPLE_TEXT_FILE);
     let mtimeMs = 0;
     try {
-      mtimeMs = statSync(file).mtimeMs;
+      mtimeMs = statSync(path.join(process.cwd(), ".archive", "sample-20-input.jsonl")).mtimeMs;
     } catch {
       return new Map();
     }
     const key = `sample:${mtimeMs}`;
     if (textCache?.key === key) return textCache.texts;
-    const texts = readTextFile(file);
+    let body: string;
+    try {
+      body = readFileSync(path.join(process.cwd(), ".archive", "sample-20-input.jsonl"), "utf8");
+    } catch {
+      return new Map();
+    }
+    const texts = textsFrom(body);
     textCache = { key, texts };
     return texts;
   }
-  const dir = path.join(process.cwd(), FULL_TEXT_DIR);
-  const names = batchTextFiles(dir);
+  const names = batchTextNames();
   const parts: string[] = [];
   for (const name of names) {
     try {
-      parts.push(`${name}:${statSync(path.join(dir, name)).mtimeMs}`);
+      parts.push(`${name}:${statSync(path.join(process.cwd(), ".archive", "grok", "in", name)).mtimeMs}`);
     } catch {
       parts.push(`${name}:missing`);
     }
@@ -334,7 +327,13 @@ function loadTexts(): Map<string, string> {
   if (textCache?.key === key) return textCache.texts;
   const texts = new Map<string, string>();
   for (const name of names) {
-    for (const [sha1, text] of readTextFile(path.join(dir, name))) texts.set(sha1, text);
+    let body: string;
+    try {
+      body = readFileSync(path.join(process.cwd(), ".archive", "grok", "in", name), "utf8");
+    } catch {
+      continue;
+    }
+    for (const [sha1, text] of textsFrom(body)) texts.set(sha1, text);
   }
   textCache = { key, texts };
   return texts;
