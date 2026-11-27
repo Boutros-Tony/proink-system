@@ -283,6 +283,16 @@ export function buildSections(document: DesignDocument, lines: CostLine[], margi
     const title = part.group ? document.groups?.[part.group] || DEFAULT_TITLE : meta.title.trim() || DEFAULT_TITLE;
     take(id, title).parts.push(part);
   }
+  // A priced job has no pieces. An item named on the job and used by a cost line is still its own row.
+  // Drawn jobs keep the rows their pieces already made, so this does not run once anything is drawn.
+  if (document.parts.length === 0) {
+    for (const line of billable) {
+      if (!line.item || isJobWide(line) || byId.has(line.item)) continue;
+      const title = document.groups?.[line.item];
+      if (!title) continue;
+      take(line.item, title);
+    }
+  }
   if (buckets.length === 0) take(DEFAULT_ITEM, meta.title.trim() || DEFAULT_TITLE);
 
   const give = (bucket: ItemBucket, key: string, cents: number) => {

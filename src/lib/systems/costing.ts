@@ -121,6 +121,35 @@ export function extraKey(id: string) {
   return `extra:${id}`;
 }
 
+/** Board lines written by Pricing. A later priceBoards call replaces every one of them. */
+export const CUT_PREFIX = "cut-";
+
+export function isCutExtraId(id: string) {
+  return id.startsWith(CUT_PREFIX);
+}
+
+export function isCutExtraKey(key: string) {
+  return key.startsWith(`extra:${CUT_PREFIX}`);
+}
+
+/**
+ * Swap the priced board lines. Splits of one sheet share a price-book ref, so this does not use
+ * addExtras: that helper would keep only the first line with a given ref.
+ */
+export function replaceCutExtras(costing: Costing, incoming: ExtraLine[]): Costing {
+  const kept = costing.extras.filter((line) => !isCutExtraId(line.id));
+  const next = incoming.filter((line) => isCutExtraId(line.id));
+  return { ...costing, extras: [...kept, ...next].slice(0, 200) };
+}
+
+/** Drop priced board lines once real pieces exist, so the engine does not count the same boards twice. */
+export function dropCutExtras(costing: Costing): { costing: Costing; edits: CostEdit[] } {
+  const cut = costing.extras.filter((line) => isCutExtraId(line.id));
+  if (cut.length === 0) return { costing, edits: [] };
+  const edits: CostEdit[] = cut.map((line) => ({ key: extraKey(line.id), remove: true }));
+  return { costing: applyCostEdits(costing, edits), edits };
+}
+
 /** The price-book entry a design line was priced from, so the review does not buy the same thing twice. */
 export function lineRef(line: Pick<BomLine, "key" | "sku">): string {
   if (line.sku.startsWith("MAT-")) return `material:${line.sku.slice(4)}`;

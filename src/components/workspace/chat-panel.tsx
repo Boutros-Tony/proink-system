@@ -7,6 +7,7 @@ import {
   ArrowUp,
   Box,
   Brain,
+  Check,
   CheckCircle2,
   ChevronRight,
   CircleSlash,
@@ -20,6 +21,7 @@ import {
 import { createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type FormEvent, type KeyboardEvent, type ReactNode } from "react";
 import { providerById, type ProviderId } from "@/lib/ai/models";
 import { ASK_USER_CHAT_NOTE, QuestionCard, openAskUserCallIds, type AskUserOutput } from "@/components/workspace/question-card";
+import { Menu, useCloseMenu } from "@/components/workspace/menu";
 import { EffortControl, ModelPicker } from "@/components/workspace/model-picker";
 import { describeAssets, getAssets } from "@/lib/studio/assets";
 import { formatCents } from "@/lib/format";
@@ -57,7 +59,7 @@ import { blenderLinked, markPulled, pullDesign } from "@/lib/blender/client";
 import { getBooth, getModelEffort, getServerBooth, getServerSettings, getStudioSettings, subscribeBooth, subscribeSettings } from "@/lib/studio/local-booth";
 import { describeSelection, mentionOptions, readMentions, type Mention, type MentionOption } from "@/lib/studio/mentions";
 import { getSelection, getServerSelection, setSelection, subscribeSelection } from "@/lib/studio/selection";
-import { addExtras, applyCostEdits, costEditSchema, designKey, emptyCosting, extraLineSchema, type Costing } from "@/lib/systems/costing";
+import { addExtras, applyCostEdits, costEditSchema, designKey, emptyCosting, extraLineSchema, replaceCutExtras, type Costing } from "@/lib/systems/costing";
 import { createEmptyDesign } from "@/lib/systems/modular/patch";
 import { acceptFinding } from "@/lib/systems/modular/review";
 import { openDesignDocument, type DesignDocument } from "@/lib/systems/modular/schema";
@@ -88,23 +90,28 @@ type ToolOutput = {
 type Thread = { id: string; projectId: string; title: string; mode: ChatMode };
 
 /**
- * Stored chat mode. Build is "quote", or "design" on older threads.
- * "image" is only an old stored value. The UI treats it as Build and never sets it.
+ * Stored chat mode. "quote" is Pricing. "design" is Engineering.
+ * "image" is an old stored value. The UI treats it as Engineering and never sets it.
  */
 export type ChatMode = "design" | "quote" | "image";
 
-/** The mode ordinary requests and the UI use. A stored "image" thread is Build. */
+/** The mode the composer shows. A stored "image" thread is Engineering. */
 function threadMode(mode: ChatMode): "quote" | "design" {
-  return mode === "image" ? "quote" : mode;
+  return mode === "quote" ? "quote" : "design";
 }
 
-/** Older "design" threads, stored "image" threads, and "quote" all run as Build. */
-function isBuildMode(mode: ChatMode) {
-  return mode === "quote" || mode === "design" || mode === "image";
+/** What the server receives. Pricing sends "price". Engineering keeps today's "quote". */
+function sentMode(mode: "quote" | "design"): "price" | "quote" {
+  return mode === "design" ? "quote" : "price";
 }
 
-/** Latest Build mode for automatic resends. Never "image": an edit overrides one request only. */
-let requestMode: "quote" | "design" = "quote";
+/** A stored Pricing chat that already has drawn pieces is Engineering. The next meta save writes "design". */
+function drawnWork(document: DesignDocument) {
+  return document.parts.length > 0 || document.walls.some((wall) => wall.bays.length > 0);
+}
+
+/** Latest request mode for automatic resends. Never "image": an edit overrides one request only. */
+let requestMode: "price" | "quote" = "price";
 
 function lastAssistantStep(messages: UIMessage[]) {
   const last = messages.at(-1);
@@ -303,8 +310,8 @@ export function ChatProvider({
             effort: getModelEffort(current.provider, current.model),
             // Sent on Build requests too. The server uses it when the user asks for a simulation.
             imageModel: current.imageModel,
-            // Same value as modeRef. Automatic resends read this. A typed message sends "quote" over it.
-            // An image edit sends "image" over it for that one request and does not write this.
+            // Pricing sends "price". Engineering sends "quote", which is what Build sent.
+            // An image edit sends "image" for that one request and does not write this.
             mode: requestMode,
           };
         },
@@ -328,9 +335,9 @@ export function ChatProvider({
   });
   useLayoutEffect(() => {
     readyRef.current = ready;
-    // Stay on Build. The edit request does not write requestMode, so the next resend is Build too.
+    // An image edit does not write requestMode, so the next resend stays on the open mode.
     modeRef.current = mode;
-    requestMode = mode;
+    requestMode = sentMode(mode);
   });
 
   function markApplied(history: UIMessage[]) {
@@ -466,13 +473,20 @@ export function ChatProvider({
           recordSpend(output);
           continue;
         }
-        if (name !== "suggestCosts" && name !== "editCosts" && name !== "groupSections" && !(name in DOCUMENT_TOOLS)) continue;
+        if (name !== "suggestCosts" && name !== "editCosts" && name !== "groupSections" && name !== "priceBoards" && name !== "nameItems" && !(name in DOCUMENT_TOOLS)) continue;
         if (applied.current.has(part.toolCallId)) continue;
         applied.current.add(part.toolCallId);
         const output = part.output as ToolOutput;
-        if (name === "groupSections") {
+        if (name === "groupSections" || name === "nameItems") {
           const grouped = sectionSchema.array().safeParse(output.sections);
           if (grouped.success) setCosting({ ...getCosting(), sections: grouped.data });
+          const moved = openDesignDocument(output.document);
+          if (moved.status === "ready") next = moved.document;
+          continue;
+        }
+        if (name === "priceBoards") {
+          const lines = extraLineSchema.array().safeParse(output.suggestions);
+          if (lines.success) costChanges.push((costing) => replaceCutExtras(costing, lines.data));
           const moved = openDesignDocument(output.document);
           if (moved.status === "ready") next = moved.document;
           continue;
@@ -480,6 +494,8 @@ export function ChatProvider({
         if (name === "suggestCosts") {
           const lines = extraLineSchema.array().safeParse(output.suggestions);
           if (lines.success && lines.data.length > 0) costChanges.push((costing) => addExtras(costing, lines.data));
+          const moved = openDesignDocument(output.document);
+          if (moved.status === "ready") next = moved.document;
           continue;
         }
         if (name === "editCosts") {
@@ -490,8 +506,10 @@ export function ChatProvider({
         const opened = openDesignDocument(output.document);
         if (opened.status === "ready") {
           next = opened.document;
+          const edits = costEditSchema.array().safeParse(output.edits);
+          if (edits.success && edits.data.length > 0) costChanges.push((costing) => applyCostEdits(costing, edits.data));
           if (name === "inspect" || name === "assemble") recordSpend(output);
-          else if (name === "addElements" || (isBuildMode(modeRef.current) && name !== "arrangeParts" && name !== "assemble")) repriced = true;
+          else if (name === "addJobMaterial" || (modeRef.current === "design" && name !== "arrangeParts" && name !== "assemble")) repriced = true;
         }
       }
     }
@@ -559,7 +577,7 @@ export function ChatProvider({
     setStopped(false);
     const created = await createJob({
       title: "New chat",
-      mode,
+      mode: "quote",
       document: createEmptyDesign(),
       costing: emptyCosting(),
       client: NO_CLIENT,
@@ -728,11 +746,11 @@ export function ChatProvider({
     }
     await send(
       {
-        text: trimmed || "Read the attached file. List the elements with their sizes and materials, and price the job.",
+        text: trimmed || (modeRef.current === "design" ? "Read the attached file. List the elements with their sizes and materials, and price the job." : "Read the attached file and price the job. Ask if a size or a material is missing."),
         files,
         ...(mentions.length > 0 ? { metadata: { mentions } } : {}),
       },
-      { body: { mode: "quote" } },
+      { body: { mode: requestMode } },
     );
     setText("");
     setAttachments([]);
@@ -757,10 +775,9 @@ export function ChatProvider({
   async function requestSimulationEdit(edit: { instruction: string; region: ImageRegion; baseImage: string; references: { name: string; url: string }[] }) {
     if (busy || !providerReady || !imageReady) return;
     clearError();
-    // This request is an image edit. The thread mode stays Build, and requestMode is not set to "image".
-    // send() merges { mode: "image" } over the transport body for this call only. DefaultChatTransport
-    // does that per request. The next typed message sends mode "quote". An automatic resend reads
-    // requestMode, which the layout effect keeps on Build, including after this request finishes.
+    // This request is an image edit. The thread mode stays Engineering, and requestMode is not set to "image".
+    // send() merges { mode: "image" } over the transport body for this call only. An automatic resend
+    // reads requestMode, which the layout effect keeps on the open mode.
     const placed = edit.references.length > 0 ? "Print the uploaded artwork in that area, fitted to the surface and lit like the rest of the stand." : "";
     const instruction = edit.instruction.trim();
     const text = [regionLine(edit.region), placed, instruction || "Apply the change in that area only."].filter(Boolean).join("\n\n");
@@ -939,7 +956,7 @@ export function ChatList() {
 
 /**
  * Ready-made first messages. Each one tells the AI what kind of file it is looking at and what to do with it,
- * and ends on a line the user finishes. They run in Build, which prices the job and can draw the stand.
+ * and ends on a line the user finishes. They run in Pricing, which prices the job and does not draw it.
  */
 const STARTERS: { id: string; label: string; hint: string; Icon: typeof FileText; prompt: string }[] = [
   {
@@ -968,8 +985,51 @@ const STARTERS: { id: string; label: string; hint: string; Icon: typeof FileText
   },
 ];
 
+function ModeChoices({ mode, onChange }: { mode: "quote" | "design"; onChange: (mode: "quote" | "design") => void }) {
+  const close = useCloseMenu();
+  const options = [
+    { id: "quote" as const, label: "Pricing", detail: "Price the job. No drawing." },
+    { id: "design" as const, label: "Engineering", detail: "Draw the stand and check it." },
+  ];
+  return (
+    <div className="p-1.5">
+      {options.map((option) => {
+        const selected = mode === option.id;
+        return (
+          <button
+            key={option.id}
+            type="button"
+            onClick={() => {
+              onChange(option.id);
+              close();
+            }}
+            className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs transition-colors ${selected ? "bg-accent-soft font-semibold text-accent" : "text-ink hover:bg-raised"}`}
+          >
+            <span className="min-w-0 flex-1">
+              <span className="block">{option.label}</span>
+              <span className="block text-[10px] font-normal text-muted">{option.detail}</span>
+            </span>
+            {selected ? <Check size={14} strokeWidth={2.5} aria-hidden="true" /> : null}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function ModeMenu({ mode, onChange }: { mode: "quote" | "design"; onChange: (mode: "quote" | "design") => void }) {
+  return (
+    <Menu label={<span className="text-xs font-medium">{mode === "design" ? "Engineering" : "Pricing"}</span>} side="top" align="left" width="w-56" variant="outline">
+      <ModeChoices mode={mode} onChange={onChange} />
+    </Menu>
+  );
+}
+
 function threadFrom(job: SavedJob): Thread {
-  return { id: job.chatId, projectId: job.projectId, title: job.title, mode: threadMode(job.mode) };
+  const stored = threadMode(job.mode);
+  // Old chats were Build but most are stored as quote. Drawn work means this one is Engineering.
+  const mode = stored === "quote" && drawnWork(job.document) ? "design" : stored;
+  return { id: job.chatId, projectId: job.projectId, title: job.title, mode };
 }
 
 function PromptStarters({ onPick }: { onPick: (id: string, prompt: string) => void }) {
@@ -1152,16 +1212,20 @@ export function ChatConversation({ above }: { above?: ReactNode }) {
           onKeyDown={onComposerKeyDown}
           rows={empty ? (chat.text.length > 160 ? 7 : 3) : 2}
           placeholder={
-            empty
-              ? "Describe the job, attach a sheet, or ask for a simulation picture. @ to mention a piece"
-              : mentions.length > 0
-                ? "Say what to change on the selected piece"
-                : "Ask for a change, a simulation picture, or more details"
+            chat.mode === "quote"
+              ? empty
+                ? "Describe the job or attach a file, and Pricing will ask what is missing."
+                : "Add a detail, or say what to change in the price."
+              : empty
+                ? "Describe the job, attach a sheet, or ask for a simulation picture. @ to mention a piece"
+                : mentions.length > 0
+                  ? "Say what to change on the selected piece"
+                  : "Ask for a change, a simulation picture, or more details"
           }
           aria-describedby="composer-hint"
           className="w-full resize-none bg-transparent px-4 pt-3.5 pb-1 text-[15px] leading-6 text-ink outline-none placeholder:text-subtle"
         />
-        <div className="flex items-center justify-between gap-2 px-2.5 pb-2.5">
+        <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1.5 px-2.5 pb-2.5">
           <div className="flex min-w-0 items-center gap-1">
             <label
               title="Attach a technical sheet, PDF or image"
@@ -1181,8 +1245,9 @@ export function ChatConversation({ above }: { above?: ReactNode }) {
                 }}
               />
             </label>
+            <ModeMenu mode={chat.mode === "design" ? "design" : "quote"} onChange={chat.setMode} />
           </div>
-          <div className="flex items-center gap-1">
+          <div className="flex max-w-full flex-wrap items-center justify-end gap-1">
             <EffortControl />
             <ModelPicker side="top" align="right" />
             {chat.busy && !(chat.questionOpen && !chat.replying) ? (
@@ -1220,7 +1285,7 @@ export function ChatConversation({ above }: { above?: ReactNode }) {
       {!chat.providerReady ? (
         <p className="mt-2 px-1 text-xs text-muted">The selected model has no key yet. Pick another model, or add its key to .env.local.</p>
       ) : null}
-      {chat.imageKeyMissing ? (
+      {chat.imageKeyMissing && chat.mode !== "quote" ? (
         <p className="mt-2 px-1 text-xs text-muted">
           Add <span className="font-mono">{providerById("google")?.env ?? "GOOGLE_GENERATIVE_AI_API_KEY"}</span> to .env.local and restart to generate or edit a simulation picture.
         </p>
@@ -1254,7 +1319,9 @@ export function ChatConversation({ above }: { above?: ReactNode }) {
           </div>
         </div>
         <p className="shrink-0 px-6 pb-6 text-center text-xs text-subtle">
-          Attach a technical sheet, a render or a PDF. ProInk prices every element, builds the booth, and draws the stand in 3D when you ask. Ask for a simulation picture when you want one.
+          {chat.mode === "quote"
+            ? "Pricing reads the file or the chat, asks what is missing, and builds the quotation."
+            : "Engineering prices the job, draws the stand, assembles it, and runs the production check."}
         </p>
       </section>
     );
@@ -1284,7 +1351,7 @@ export function ChatConversation({ above }: { above?: ReactNode }) {
                 })}
               </article>
             ) : (
-              <AssistantMessage key={message.id} message={message} live={chat.busy && !chat.questionOpen && message === chat.messages.at(-1)} openPanel={chat.openPanel} onAnswer={chat.answerQuestion} />
+              <AssistantMessage key={message.id} message={message} live={chat.busy && !chat.questionOpen && message === chat.messages.at(-1)} openPanel={chat.openPanel} onAnswer={chat.answerQuestion} pricing={chat.mode === "quote"} />
             ),
           )}
           {chat.busy && !chat.questionOpen ? (
@@ -1321,8 +1388,10 @@ const WORKING_LABEL: Record<string, string> = {
   ...QUIET_TOOLS,
   ...Object.fromEntries(Object.entries(DOCUMENT_TOOLS).map(([name, labels]) => [name, labels.working])),
   suggestCosts: "Pricing the job…",
+  priceBoards: "Pricing the boards…",
   editCosts: "Changing the cost…",
   groupSections: "Building the quotation…",
+  nameItems: "Renaming items…",
   generateStandImage: "Generating the simulation…",
 };
 
@@ -1338,7 +1407,7 @@ function plural(count: number, one: string, many = `${one}s`) {
 }
 
 /** One finished or running tool call, as a line the user can read. */
-function describeStep(part: MessagePart, live: boolean, openPanel: (panel: ChatPanel) => void): Step | null {
+function describeStep(part: MessagePart, live: boolean, openPanel: (panel: ChatPanel) => void, pricing = false): Step | null {
   if (!isToolUIPart(part)) return null;
   const name = getToolName(part);
   if (name === "askUser" || name in QUIET_TOOLS) return null;
@@ -1351,7 +1420,13 @@ function describeStep(part: MessagePart, live: boolean, openPanel: (panel: ChatP
   if (output.error) return { label: output.error, state: "failed" };
   const viewPrice = { label: "View price", onClick: () => openPanel("cost") };
 
-  if (name === "generateStandImage") return { label: "Simulation ready", state: "done", action: { label: "View simulation", onClick: () => openPanel("simulation") } };
+  if (name === "generateStandImage") return { label: "Simulation ready", state: "done", ...(pricing ? {} : { action: { label: "View simulation", onClick: () => openPanel("simulation") } }) };
+  if (name === "priceBoards") {
+    return { label: `Boards priced · ${formatCents(output.totalCents ?? 0)}`, state: "done", action: viewPrice };
+  }
+  if (name === "nameItems") {
+    return { label: "Items renamed", state: "done", action: viewPrice };
+  }
   if (name === "suggestCosts") {
     const count = Array.isArray(output.suggestions) ? output.suggestions.length : 0;
     if (count === 0) return { label: "Nothing new to price", state: "done" };
@@ -1376,7 +1451,7 @@ function describeStep(part: MessagePart, live: boolean, openPanel: (panel: ChatP
   }
   if (name === "inspect") {
     const findings = output.inspection?.findings?.length ?? 0;
-    return { label: inspectionLine(findings, output.ms), state: "done", action: { label: "View checks", onClick: () => openPanel("checks") } };
+    return { label: inspectionLine(findings, output.ms), state: "done", ...(pricing ? {} : { action: { label: "View checks", onClick: () => openPanel("checks") } }) };
   }
   if (name === "addJobMaterial") {
     const input = part.input as { name?: unknown } | undefined;
@@ -1410,11 +1485,13 @@ function AssistantMessage({
   live,
   openPanel,
   onAnswer,
+  pricing,
 }: {
   message: UIMessage;
   live: boolean;
   openPanel: (panel: ChatPanel) => void;
   onAnswer: (toolCallId: string, output: AskUserOutput) => Promise<void>;
+  pricing: boolean;
 }) {
   const segments: Segment[] = [];
   message.parts.forEach((part, index) => {
@@ -1430,7 +1507,7 @@ function AssistantMessage({
       segments.push({ kind: "question", key: part.toolCallId, part });
       return;
     }
-    const step = describeStep(part, live, openPanel);
+    const step = describeStep(part, live, openPanel, pricing);
     if (!step) return;
     const last = segments.at(-1);
     if (last?.kind === "steps") last.steps.push(step);

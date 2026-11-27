@@ -788,7 +788,7 @@ function Workspace({ actionsRef }: { actionsRef: RefObject<Actions> }) {
                           Stop
                         </button>
                       </div>
-                    ) : document.parts.length > 0 && !document.assembled ? (
+                    ) : chat.mode !== "quote" && document.parts.length > 0 && !document.assembled ? (
                       <div className="absolute bottom-3 left-1/2 flex -translate-x-1/2 items-center gap-3 rounded-xl border border-line bg-panel/95 px-3 py-2 shadow-float backdrop-blur-md">
                         <p className="text-[11px] text-muted">{document.parts.length} pieces priced, not assembled</p>
                         <button

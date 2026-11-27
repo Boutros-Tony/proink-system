@@ -38,6 +38,11 @@ describe("chat timing", () => {
     expect(text).toBe("[chat] 2m10s · model google/gemini-4-argon · steps 1 · stopped\n  step 1 2m10s (inspect wait 2m05s, 1m10s/1 step)");
   });
 
+  it("names the mode in the log header when the reply is a pricing run", () => {
+    const text = formatChatLog({ totalMs: 4_000, model: "google/gemini", mode: "price", steps: [{ ms: 4_000, tools: [{ name: "priceBoards", waitMs: 0, runMs: 80 }] }] });
+    expect(text.startsWith("[chat price] 4s · model google/gemini · steps 1")).toBe(true);
+  });
+
   it("formats chat lines with a space in the minutes", () => {
     expect(formatLogDuration(200)).toBe("0.2s");
     expect(formatChatDuration(70_000)).toBe("1m 10s");

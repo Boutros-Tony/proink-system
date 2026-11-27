@@ -171,4 +171,28 @@ describe("quotation sections", () => {
     });
     expect(pdf.subarray(0, 4).toString()).toBe("%PDF");
   });
+
+  it("gives a priced job with no pieces one row per named item", () => {
+    const document = createEmptyDesign();
+    document.groups = { "item-shelf": "Shelf", "item-counter": "Counter" };
+    const lines = [
+      { ...line("extra:cut-1", "materials", "MDF board", 4000), item: "item-shelf" },
+      { ...line("extra:cut-2", "materials", "MDF board", 6000), item: "item-counter" },
+      { ...line("extra:led", "lighting", "LED strip", 2000), item: "item-shelf" },
+      { ...line("extra:truck", "logistics", "Transport to site", 3000) },
+    ];
+    const rows = buildSections(document, lines, 0, { ...emptyQuoteMeta(), title: "Beirut shelf" });
+    expect(rows.filter((row) => !row.jobWide).map((row) => row.title)).toEqual(["Shelf", "Counter"]);
+    expect(rows.find((row) => row.title === "Shelf")?.costCents).toBe(6000);
+    expect(rows.find((row) => row.jobWide)?.title).toBe("Installation and transport");
+    expect(rows.find((row) => row.jobWide)?.costCents).toBe(3000);
+  });
+
+  it("keeps one row named from the quote when a priced job has no items", () => {
+    const rows = buildSections(createEmptyDesign(), [line("extra:labor", "labor", "Workshop labor", 5000)], 0, { ...emptyQuoteMeta(), title: "Beirut shelf" });
+    expect(rows.map((row) => row.title)).toEqual(["Beirut shelf"]);
+    expect(rows[0].costCents).toBe(5000);
+    const untitled = buildSections(createEmptyDesign(), [line("extra:labor", "labor", "Workshop labor", 5000)], 0, emptyQuoteMeta());
+    expect(untitled.map((row) => row.title)).toEqual(["Stand"]);
+  });
 });

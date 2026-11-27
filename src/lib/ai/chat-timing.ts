@@ -39,8 +39,9 @@ function formatTool(tool: TimedTool) {
   return `${tool.name} ${wait}${run}`;
 }
 
-export function formatChatLog(input: { totalMs: number; model: string; steps: TimedStep[]; stopped?: boolean }) {
-  const head = `[chat] ${formatLogDuration(input.totalMs)} · model ${input.model} · steps ${input.steps.length}${input.stopped ? " · stopped" : ""}`;
+export function formatChatLog(input: { totalMs: number; model: string; steps: TimedStep[]; stopped?: boolean; mode?: string }) {
+  const tag = input.mode ? `[chat ${input.mode}]` : "[chat]";
+  const head = `${tag} ${formatLogDuration(input.totalMs)} · model ${input.model} · steps ${input.steps.length}${input.stopped ? " · stopped" : ""}`;
   if (input.steps.length === 0) return head;
   const body = input.steps
     .map((step, index) => {
@@ -58,7 +59,7 @@ export function readStepCount(output: unknown) {
 }
 
 /** Collects step and tool times for one reply and prints them once. */
-export function createChatLog(now = Date.now) {
+export function createChatLog(now = Date.now, mode?: string) {
   const started = now();
   const steps: TimedStep[] = [];
   let open: { started: number; tools: TimedTool[] } | null = null;
@@ -94,7 +95,7 @@ export function createChatLog(now = Date.now) {
       if (printed) return;
       printed = true;
       close();
-      console.log(formatChatLog({ totalMs: Math.max(0, now() - started), model, steps, stopped }));
+      console.log(formatChatLog({ totalMs: Math.max(0, now() - started), model, steps, stopped, mode }));
     },
   };
 }

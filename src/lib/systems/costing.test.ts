@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { dataRefs, equipmentSuggestions, readReview, resolveSuggestions } from "../ai/cost-review";
 import { seedCatalog } from "./catalog";
-import { addExtras, applyCostEdits, applyCosting, billableLines, emptyCosting, readCosting, removeExtra, setOverride, type Costing } from "./costing";
+import { addExtras, applyCostEdits, applyCosting, billableLines, dropCutExtras, emptyCosting, readCosting, removeExtra, replaceCutExtras, setOverride, type Costing, type ExtraLine } from "./costing";
 import { applyPriceBook, defaultPriceBook, estimateMaterials, readPriceBook, type PriceBook } from "./materials";
 import { createEmptyDesign } from "./modular/patch";
 import { produceDesign } from "./modular/produce";
@@ -257,5 +257,34 @@ describe("prices suggested from the chat", () => {
     const removed = removeExtra(added, lines[0].id);
     expect(removed.extras).toHaveLength(0);
     expect(addExtras(removed, lines).extras).toHaveLength(0);
+  });
+
+  it("replaces priced board lines, including two splits that share a price-book ref", () => {
+    const cut = (id: string, description: string): ExtraLine => ({
+      id,
+      description,
+      group: "materials",
+      quantity: 1,
+      unit: "board",
+      unitCents: 10000,
+      source: "data",
+      ref: "material:mdf-18",
+    });
+    const kept: ExtraLine = { id: "led", description: "LED strip", group: "lighting", quantity: 4, unit: "meter", unitCents: 700, source: "new" };
+    const first = replaceCutExtras(emptyCosting(), [cut("cut-1", "Old board"), cut("cut-9", "Older board")]);
+    const next = replaceCutExtras({ ...first, extras: [...first.extras, kept] }, [cut("cut-1", "Shelf boards"), cut("cut-2", "Counter boards")]);
+    expect(next.extras.map((line) => line.id)).toEqual(["led", "cut-1", "cut-2"]);
+    expect(next.extras.filter((line) => line.ref === "material:mdf-18")).toHaveLength(2);
+  });
+
+  it("drops priced board lines once real pieces exist, so they are not counted twice", () => {
+    const cut: ExtraLine = { id: "cut-1", description: "MDF board", group: "materials", quantity: 1, unit: "board", unitCents: 10000, source: "data", ref: "material:mdf-18" };
+    const kept: ExtraLine = { id: "led", description: "LED strip", group: "lighting", quantity: 1, unit: "meter", unitCents: 700, source: "new" };
+    const costing = { ...emptyCosting(), extras: [cut, kept] };
+    const dropped = dropCutExtras(costing);
+    expect(dropped.costing.extras).toEqual([kept]);
+    expect(dropped.edits).toEqual([{ key: "extra:cut-1", remove: true }]);
+    expect(applyCostEdits(costing, dropped.edits).extras).toEqual([kept]);
+    expect(dropCutExtras(emptyCosting()).edits).toEqual([]);
   });
 });

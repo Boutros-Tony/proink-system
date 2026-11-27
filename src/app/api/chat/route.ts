@@ -22,11 +22,13 @@ import { createChatLog, readStepCount } from "@/lib/ai/chat-timing";
 import { inspectionFiles, jobBrief } from "@/lib/ai/job-brief";
 import { inspectStand } from "@/lib/ai/inspect";
 import { createToolGate, runGated, type GateMode } from "@/lib/ai/tool-gate";
+import { briefPriceBoards, priceBoardPieces, rememberItem } from "@/lib/ai/price-boards";
+import { PRICE_TOOLS, pricePrompt } from "@/lib/ai/price-prompt";
 import { QUOTE_TOOLS, quotePrompt, type QuoteSource } from "@/lib/ai/quote-prompt";
 import { pastQuotesAvailable, searchPastJobs } from "@/lib/archive/past-quotes";
 import { EFFORTS, resolveLanguageModel } from "@/lib/ai/resolve-model";
 import { seedCatalog } from "@/lib/systems/catalog";
-import { addExtras, applyCostEdits, applyCosting, extraKey, readCosting, type CostEdit, type ExtraLine } from "@/lib/systems/costing";
+import { addExtras, applyCostEdits, applyCosting, dropCutExtras, extraKey, isCutExtraKey, readCosting, replaceCutExtras, type CostEdit, type ExtraLine } from "@/lib/systems/costing";
 import { applyPriceBook } from "@/lib/systems/materials";
 import { chatRun, expandStoredFiles, loadShopPriceBook, requireStudio, saveProjectWork } from "@/lib/studio/server-data";
 import { changeReport, describePart } from "@/lib/systems/modular/change-report";
@@ -147,6 +149,26 @@ function briefQuoteResult(output: unknown) {
   const removed = textList(record.removed);
   if (removed.length > 0) report.push(`Removed: ${removed.join(", ")}.`);
   return [lines.join(" "), report.join("\n")].filter(Boolean).join("\n") || "Done.";
+}
+
+/** Pricing mode hides the document that suggestCosts returns for the client. The model still sees each line. */
+function briefSuggestCosts(output: unknown) {
+  if (!output || typeof output !== "object") return "Done.";
+  const record = output as {
+    error?: string;
+    suggestions?: { description?: string; quantity?: number; unit?: string; unitCents?: number; source?: string }[];
+    totalCents?: number;
+    note?: string;
+    alreadyOnCostNote?: string;
+    countedByStudioNote?: string;
+  };
+  if (record.error) return record.error;
+  const dollars = (cents: number) => `$${(cents / 100).toFixed(2)}`;
+  const lines = (record.suggestions ?? []).map((line) => {
+    const total = Math.round((line.quantity ?? 0) * (line.unitCents ?? 0));
+    return `- ${line.description ?? "Line"}: ${line.quantity ?? 0} ${line.unit ?? ""} = ${dollars(total)}${line.source === "new" ? " estimated" : ""}`;
+  });
+  return [`${lines.length} lines, ${dollars(record.totalCents ?? 0)}.`, ...lines, record.note, record.alreadyOnCostNote, record.countedByStudioNote].filter(Boolean).join("\n");
 }
 
 /** What assembly sends the model after each arrangement: only what still needs fixing. */
@@ -293,17 +315,17 @@ export async function POST(request: Request) {
     }
   }
 
-  // Build lists, prices, and draws, and can make a simulation when the Google image key is set.
-  // mode "image" only edits a simulation: it does not price or draw. Assemble only moves pieces.
-  // Older chats saved as design or quote are both Build.
+  // Pricing (`price`) asks and prices, and does not draw. Engineering (`quote`) is today's Build.
+  // mode "image" only edits a simulation. Assemble only moves pieces.
   const assembleMode = body.assemble === true;
   const imageMode = !assembleMode && body.mode === "image";
-  const buildMode = !assembleMode && !imageMode;
+  const priceMode = !assembleMode && !imageMode && body.mode === "price";
+  const buildMode = !assembleMode && !imageMode && !priceMode;
   // Same check as resolveImageModel and /api/providers: GOOGLE_GENERATIVE_AI_API_KEY is set.
   const standImage = buildMode && !("error" in resolveImageModel(body.imageModel ?? ""));
-  const pastQuotes = buildMode && pastQuotesAvailable();
+  const pastQuotes = (buildMode || priceMode) && pastQuotesAvailable();
   const messages = await expandStoredFiles(body.messages ?? []);
-  const pictures = buildMode ? await attachedPictures(messages) : [];
+  const pictures = buildMode || priceMode ? await attachedPictures(messages) : [];
   const zooms = new Map<string, string>();
   const costing = readCosting(body.costing);
   /** The costs as this reply changes them. Stored with the drawing after every step. */
@@ -329,7 +351,22 @@ export async function POST(request: Request) {
     return blenderMode ? `${prompt}\n\n${BLENDER_SECTION}` : prompt;
   }
 
-  const blenderMode = !imageMode && body.blender === true && blenderAllowed();
+  function priceSystem() {
+    // The lines already stored on this job, including earlier board prices, so the model does not add them again.
+    const costed = applyCosting(produceDesign(current, seedCatalog(), priceBook).lines, costingNow);
+    const hasFiles = messages.some((message) => message.parts.some((part) => part.type === "file"));
+    return pricePrompt({ document: current, book: jobBook(), refs: jobRefs(), costed, hasFiles, sourceKind, pastQuotes, pictures: pictureList(pictures) });
+  }
+
+  /** Once pieces exist, priced board lines would be counted again by the cutting plan. */
+  function clearCutLines(): CostEdit[] {
+    if (current.parts.length === 0) return [];
+    const dropped = dropCutExtras(costingNow);
+    costingNow = dropped.costing;
+    return dropped.edits;
+  }
+
+  const blenderMode = !imageMode && !priceMode && body.blender === true && blenderAllowed();
   /** Screenshots for the model in this reply only. The stored chat keeps a note, not the pictures. */
   const blenderShots = new Map<string, LookReply["images"]>();
   /** Show Blender the stand as it is now. Says what went wrong, or nothing. */
@@ -385,12 +422,52 @@ export async function POST(request: Request) {
               }));
             const known = new Set(bookForJob(priceBook, current).materials.map((material) => material.id));
             const unknown = [...new Set(elements.flatMap((element) => (element.materialId && !known.has(element.materialId) ? [element.materialId] : [])))];
-            return result({ ids: placed.ids, boards, ...(unknown.length > 0 ? { unknownMaterialIds: unknown, note: "These ids are not in the shop's sheets, so those pieces were priced by material instead." } : {}) });
+            const edits = clearCutLines();
+            return result({ ids: placed.ids, boards, ...(edits.length > 0 ? { edits } : {}), ...(unknown.length > 0 ? { unknownMaterialIds: unknown, note: "These ids are not in the shop's sheets, so those pieces were priced by material instead." } : {}) });
           }),
       }),
-      suggestCosts: tool({
+      priceBoards: tool({
         description:
-          "Quote mode. Suggest every other cost the job needs: hardware, finishing, printing, bought-in equipment and furniture, lighting, electrical, labor, installation, transport. The boards and sheets the elements are cut from are priced by the engine, so leave them out; acrylic or foam pieces go in with addElements and materialId. Use match with an id from the shop's own prices when one fits, otherwise match null with an honest estimateUsd for one unit. The lines go straight into the price; the user can change or remove any of them in the Price panel. Set item to the unit's name for print and anything that belongs to one unit. Leave item out for installation, transport, and delivery.",
+          "Pricing mode. Price every flat piece the workshop cuts from board or sheet. Send the full list each time: this replaces the board lines already on the cost. Dimensions are millimeters. thickness is the board thickness. Material is paint, mdf, wood, laminate, metal, or glass. A piece cut from a listed sheet also sets materialId. Set item to the unit's name when the job has more than one unit, the same name every time. Leave item off when the job is one unit.",
+        inputSchema: z.object({
+          pieces: z
+            .array(
+              z.object({
+                name: z.string().min(1).max(80),
+                width: z.number().positive().max(50_000),
+                height: z.number().positive().max(50_000),
+                thickness: z.number().positive().max(50_000),
+                material: partMaterialSchema,
+                materialId: z.string().min(1).max(60).optional(),
+                quantity: z.number().int().min(1).max(200).default(1),
+                item: z.string().min(1).max(80).optional(),
+              }),
+            )
+            .min(1)
+            .max(120),
+        }),
+        execute: async ({ pieces }) =>
+          attempt(() => {
+            const priced = priceBoardPieces(current, pieces, priceBook);
+            current = priced.document;
+            costingNow = replaceCutExtras(costingNow, priced.extras);
+            return {
+              suggestions: priced.extras,
+              ...(priced.groupsChanged ? { document: priced.document } : {}),
+              boards: priced.boards,
+              other: priced.other,
+              totalCents: priced.totalCents,
+              ...(priced.unpriced.length > 0 ? { unpriced: priced.unpriced } : {}),
+              ...(priced.note ? { note: priced.note } : {}),
+            };
+          }),
+        toModelOutput: ({ output }) => ({ type: "text", value: briefPriceBoards(output) }),
+      }),
+      suggestCosts: tool({
+        description: (priceMode
+          ? "Pricing mode. Suggest every other cost the job needs: hardware, finishing, printing, bought-in equipment and furniture, lighting, electrical, labor, installation, transport. Boards, sheets, edge banding, primer, and paint come from priceBoards, so leave them out; acrylic or foam pieces go in with priceBoards and materialId. "
+          : "Quote mode. Suggest every other cost the job needs: hardware, finishing, printing, bought-in equipment and furniture, lighting, electrical, labor, installation, transport. The boards and sheets the elements are cut from are priced by the engine, so leave them out; acrylic or foam pieces go in with addElements and materialId. ") +
+          "Use match with an id from the shop's own prices when one fits, otherwise match null with an honest estimateUsd for one unit. The lines go straight into the price; the user can change or remove any of them in the Price panel. Set item to the unit's name for print and anything that belongs to one unit. Leave item off for installation, transport, and delivery.",
         inputSchema: z.object({
           items: z
             .array(
@@ -410,6 +487,7 @@ export async function POST(request: Request) {
         }),
         execute: async ({ items }) =>
           attempt(() => {
+            const groupsBefore = current.groups;
             const costed = applyCosting(produceDesign(current, seedCatalog(), priceBook).lines, costing);
             // A TV always needs its mount, cable, and player, so those are added without relying on the model.
             const known = new Set(pending.flatMap((line) => [line.description.toLowerCase(), ...(line.ref ? [line.ref] : [])]));
@@ -418,7 +496,13 @@ export async function POST(request: Request) {
             const sheets = items.filter((item) => item.match?.startsWith("material:"));
             const named = items
               .filter((item) => !item.match?.startsWith("material:"))
-              .map((item) => ({ ...item, ...(item.item ? { item: resolveItemId(current, item.item) } : {}) }));
+              .map((item) => {
+                if (!item.item) return item;
+                if (!priceMode) return { ...item, item: resolveItemId(current, item.item) };
+                const remembered = rememberItem(current, item.item);
+                current = remembered.document;
+                return { ...item, item: remembered.id };
+              });
             const engine = new Set(costed.lines.filter((line) => line.origin === "design" && line.ref).map((line) => line.ref!));
             const onCost = new Set([...costed.lines.flatMap((line) => (line.ref ? [line.ref] : [])), ...pending.flatMap((line) => (line.ref ? [line.ref] : []))]);
             const fresh = resolveSuggestions(named, { refs: jobRefs(), costed, preset: [...pending, ...equipment] });
@@ -436,18 +520,22 @@ export async function POST(request: Request) {
               ...(countedByStudio.length > 0 ? { countedByStudio, countedByStudioNote: "The studio already counts these from the pieces. Do not add them again." } : {}),
               estimated: added.filter((line) => line.source === "new").length,
               totalCents: added.reduce((sum, line) => sum + Math.round(line.quantity * line.unitCents), 0),
+              ...(priceMode && current.groups !== groupsBefore ? { document: current } : {}),
               ...(sheets.length > 0
                 ? {
                     sheetsRefused: sheets.map((item) => item.description),
-                    note: "Sheets are not cost lines. Add the pieces cut from them with addElements and materialId, so the cutting plan counts the boards.",
+                    note: priceMode
+                      ? "Sheets are not cost lines. Call priceBoards with the pieces cut from them and their materialId."
+                      : "Sheets are not cost lines. Add the pieces cut from them with addElements and materialId, so the cutting plan counts the boards.",
                   }
                 : {}),
             };
           }),
       }),
       editCosts: tool({
-        description:
-          "Quote mode. Change or take off lines already on the cost, by their key from <already-on-cost> or the extra:<id> of a line suggestCosts added. Set remove to take a line off. Set quantity or unitUsd to change it. When the user changes how many of something or its price, change that line instead of adding a second one. A line the studio counts from the pieces comes back when the pieces change, so change the pieces instead when the drawing is wrong.",
+        description: priceMode
+          ? "Pricing mode. Change or take off lines already on the cost, by their key from <already-on-cost> or the extra:<id> of a line suggestCosts added. Set remove to take a line off. Set quantity or unitUsd to change it. When the user changes how many of something or its price, change that line instead of adding a second one. A board line changes only through priceBoards. Call priceBoards again with the full list."
+          : "Quote mode. Change or take off lines already on the cost, by their key from <already-on-cost> or the extra:<id> of a line suggestCosts added. Set remove to take a line off. Set quantity or unitUsd to change it. When the user changes how many of something or its price, change that line instead of adding a second one. A line the studio counts from the pieces comes back when the pieces change, so change the pieces instead when the drawing is wrong.",
         inputSchema: z.object({
           lines: z
             .array(
@@ -463,6 +551,9 @@ export async function POST(request: Request) {
         }),
         execute: async ({ lines }) =>
           attempt(() => {
+            if (priceMode && lines.some((change) => isCutExtraKey(change.key))) {
+              return { error: "Board lines change only through priceBoards. Call priceBoards again with the full list." };
+            }
             const costed = applyCosting(produceDesign(current, seedCatalog(), priceBook).lines, costingNow);
             const edits: CostEdit[] = [];
             const missing: string[] = [];
@@ -532,6 +623,28 @@ export async function POST(request: Request) {
           return { sections: grouped, count: grouped.length, ...(items && items.length > 0 ? { document: current } : {}) };
         },
       }),
+      nameItems: tool({
+        description: "Pricing mode. Rename an item. item is the item's current name or id. title is the new name. Call this only when the user asked to rename an item.",
+        inputSchema: z.object({
+          items: z.array(z.object({ item: z.string().min(1).max(80), title: z.string().min(1).max(80) })).min(1).max(20),
+        }),
+        execute: async ({ items }) => {
+          current = applyItemEdits(current, items.map((row) => ({ itemId: row.item, title: row.title })));
+          const costed = applyCosting(produceDesign(current, seedCatalog(), priceBook).lines, costingNow);
+          const margin = typeof body.marginPercent === "number" ? body.marginPercent : 20;
+          const previous = costingNow.sections.map((section) => {
+            const edit = items.find((item) => resolveItemId(current, item.item) === section.itemId);
+            return edit ? { ...section, title: edit.title, titleEdited: false } : section;
+          });
+          const grouped = buildSections(current, costed.lines, margin, costingNow.quote, previous);
+          costingNow = { ...costingNow, sections: grouped };
+          return { document: current, sections: grouped, count: grouped.length };
+        },
+        toModelOutput: ({ output }) => ({
+          type: "text",
+          value: output && typeof output === "object" && "count" in output ? `Renamed. ${String((output as { count: unknown }).count)} rows.` : "Renamed.",
+        }),
+      }),
       getDesign: tool({
         description: "Read the current booth document.",
         inputSchema: z.object({}),
@@ -560,7 +673,8 @@ export async function POST(request: Request) {
               const part = byId.get(id);
               return part ? [describePart(part)] : [];
             });
-            return result({ ids: added.ids, changed });
+            const edits = clearCutLines();
+            return result({ ids: added.ids, changed, ...(edits.length > 0 ? { edits } : {}) });
           }),
       }),
       updateParts: tool({
@@ -684,7 +798,8 @@ export async function POST(request: Request) {
             if (!template) return { error: `No template named ${templateId}. Call listTemplates.` };
             const built = applyTemplate(current, template, values ?? {}, mode ?? "replace");
             current = built.document;
-            return result({ ids: built.ids });
+            const edits = clearCutLines();
+            return result({ ids: built.ids, ...(edits.length > 0 ? { edits } : {}) });
           }),
       }),
       applyDesignPatch: tool({
@@ -697,7 +812,8 @@ export async function POST(request: Request) {
               return { error: "Here pieces are added with addElements and changed with updateParts, moveParts, and removeParts, so nothing already drawn is lost. Use this tool only for a modular booth frame (walls and features) or with parts [] to clear everything." };
             }
             current = applyDesignPatch(current, patch);
-            return result();
+            const edits = clearCutLines();
+            return result(edits.length > 0 ? { edits } : {});
           }),
       }),
       generateStandImage: tool({
@@ -728,11 +844,13 @@ export async function POST(request: Request) {
           if (failed(ran) && !("output" in ran)) return { error: "error" in ran ? ran.error : "Blender did not answer." };
           const pulled = await pullFromBlender(current);
           if (!failed(pulled) && !pulled.empty) current = pulled.document;
+          const edits = clearCutLines();
           return result({
             ran: ran.ok,
             printed: "output" in ran ? String(ran.output).slice(-4000) : "",
             ...(ran.ok ? {} : { error: String((ran as { error?: string }).error ?? "The code failed.").slice(-3000) }),
             notes: failed(pulled) ? [String(pulled.error)] : pulled.notes,
+            ...(edits.length > 0 ? { edits } : {}),
           });
         },
       }),
@@ -821,8 +939,9 @@ export async function POST(request: Request) {
         toModelOutput: ({ output }) => ({ type: "text", value: briefInspection(output, { ask: !assembleMode }) }),
       }),
       addJobMaterial: tool({
-        description:
-          "Quote mode. Add one board or sheet priced by estimate for this job only. Only for a board or sheet that is in neither <materials> nor <sheets>; never for hardware, labor or anything bought by the piece (that is suggestCosts). Set materialId on the pieces cut from it to the id this returns.",
+        description: priceMode
+          ? "Pricing mode. Add one board or sheet priced by estimate for this job only. Only for a board or sheet that is in neither <materials> nor <sheets>; never for hardware, labor or anything bought by the piece (that is suggestCosts). Set materialId on the priceBoards pieces cut from it to the id this returns."
+          : "Quote mode. Add one board or sheet priced by estimate for this job only. Only for a board or sheet that is in neither <materials> nor <sheets>; never for hardware, labor or anything bought by the piece (that is suggestCosts). Set materialId on the pieces cut from it to the id this returns.",
         inputSchema: z.object({
           name: z.string().min(2).max(70),
           piece: partMaterialSchema.nullable(),
@@ -846,7 +965,7 @@ export async function POST(request: Request) {
               ...(typeof thicknessMm === "number" ? { thicknessMm } : {}),
             });
             current = added.document;
-            return result({ materialId: added.id, note: "Priced by estimate on this job only. Set materialId on the pieces cut from it." });
+            return result({ materialId: added.id, note: priceMode ? "Priced by estimate on this job only. Set materialId on the priceBoards pieces cut from it." : "Priced by estimate on this job only. Set materialId on the pieces cut from it." });
           }),
       }),
   };
@@ -866,11 +985,12 @@ export async function POST(request: Request) {
   }
   arrangeForAssembly = tools.arrangeParts.execute as never;
 
-  const outgoing = assembleMode ? assemblyHistory(messages) : buildMode ? slimQuoteHistory(withMentions(messages)) : withMentions(messages);
+  const outgoing = assembleMode ? assemblyHistory(messages) : buildMode || priceMode ? slimQuoteHistory(withMentions(messages)) : withMentions(messages);
   if (buildMode) {
     const brief = ({ output }: { output: unknown }) => ({ type: "text" as const, value: briefQuoteResult(output) });
     for (const name of ["getDesign", "addElements", "updateParts", "moveParts", "removeParts", "applyTemplate", "applyDesignPatch", "blenderPython", "addJobMaterial"] as const) tools[name].toModelOutput = brief;
   }
+  if (priceMode) tools.suggestCosts.toModelOutput = ({ output }) => ({ type: "text", value: briefSuggestCosts(output) });
 
   const modelMessages = await convertToModelMessages(outgoing, { tools });
   const run = typeof body.chatId === "string" && body.chatId ? chatRun(gate, { chatId: body.chatId, projectId: body.projectId, files: readFiles(body.files) }) : null;
@@ -894,7 +1014,8 @@ export async function POST(request: Request) {
 
   // Calls in one step start together. These three wait for the ones that started before them.
   const toolGate = createToolGate();
-  const timing = createChatLog();
+  const logMode = priceMode ? "price" : imageMode ? "image" : assembleMode ? "assemble" : "quote";
+  const timing = createChatLog(Date.now, logMode);
   const guarded = tools as unknown as Record<string, { execute?: (input: never, options: never) => Promise<unknown> }>;
   for (const name of Object.keys(guarded)) {
     const original = guarded[name]?.execute;
@@ -930,16 +1051,20 @@ export async function POST(request: Request) {
       ? assemblePrompt(current, { inspect: true })
       : imageMode
         ? imagePrompt(current)
-        : quoteSystem(),
+        : priceMode
+          ? priceSystem()
+          : quoteSystem(),
     ...providerOptions(),
     messages: modelMessages,
     temperature: imageMode ? undefined : 0,
-    stopWhen: stepCountIs(imageMode ? 4 : assembleMode ? 6 : 20),
+    stopWhen: stepCountIs(imageMode ? 4 : assembleMode ? 6 : priceMode ? 8 : 20),
     activeTools: assembleMode
       ? [...ASSEMBLE_TOOLS]
       : imageMode
         ? [...IMAGE_TOOLS]
-        : [...QUOTE_TOOLS, ...(standImage ? ["generateStandImage" as const] : []), ...(pastQuotes ? ["findPastQuotes" as const] : []), ...(blenderMode ? BLENDER_TOOLS : []), ...(pictures.length ? ["zoomFile" as const] : [])],
+        : priceMode
+          ? [...PRICE_TOOLS, ...(pastQuotes ? ["findPastQuotes" as const] : []), ...(pictures.length ? ["zoomFile" as const] : [])]
+          : [...QUOTE_TOOLS, ...(standImage ? ["generateStandImage" as const] : []), ...(pastQuotes ? ["findPastQuotes" as const] : []), ...(blenderMode ? BLENDER_TOOLS : []), ...(pictures.length ? ["zoomFile" as const] : [])],
     // A reload or a closed tab does not end the reply. Only Stop does, through the chat's stop flag, or the time limit.
     abortSignal: AbortSignal.any([run ? stopper.signal : request.signal, deadline]),
     ...(process.env.NODE_ENV === "development" ? { include: { requestBody: true } } : {}),

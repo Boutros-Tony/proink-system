@@ -37,7 +37,7 @@ function stockText(material: PriceBook["materials"][number]) {
 }
 
 /** What each piece material is priced as, so the model picks the material that matches the shop's real stock. */
-function materialLines(book: PriceBook) {
+export function materialLines(book: PriceBook) {
   const lines = book.materials.flatMap((material) => (material.piece ? [`- ${material.piece}: ${stockText(material)}`] : []));
   const paint = book.materials.some((material) => material.piece === "paint");
   const mdf = book.materials.some((material) => material.piece === "mdf");
@@ -45,11 +45,11 @@ function materialLines(book: PriceBook) {
 }
 
 /** Sheets that are not one of the piece materials. A piece cut from one names it with materialId. */
-function sheetLines(book: PriceBook) {
+export function sheetLines(book: PriceBook) {
   return book.materials.flatMap((material) => (material.piece ? [] : [`- materialId ${material.id}: ${stockText(material)}`]));
 }
 
-const SOURCE_NOTE = {
+export const SOURCE_NOTE = {
   simulation: "This job was marked as a simulation or render. There is no scale unless the user gave a reference size. Do not invent sizes: when the overall size is not given, ask for it first, then take every other size from the picture's proportions.",
   technical: "This job was marked as a technical sheet. The sizes written on it are what the client asked for: copy them exactly. When a written size cannot work once the stand is built and loaded, keep it as written and report it under Check with the size you would use.",
   "3d_file": "This job was marked as a 3D model. Scale every element from the overall size the user gave.",
