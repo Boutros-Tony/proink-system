@@ -25,7 +25,7 @@ export function EffortControl() {
   const effort = useSyncExternalStore(subscribeEffort, () => getModelEffort(settings.provider, settings.model), getServerEffort);
   if (!supportsEffort(settings.provider, settings.model)) return null;
   return (
-    <div role="group" aria-label="Reasoning effort" title="Higher thinks longer and costs more" className="inline-flex h-[30px] rounded-[10px] border border-line bg-panel p-0.5 shadow-soft">
+    <div role="group" aria-label="Reasoning effort" title="Higher thinks longer and costs more" className="inline-flex h-[30px] max-w-full rounded-[10px] border border-line bg-panel p-0.5 shadow-soft">
       {EFFORTS.map((item) => {
         const active = effort === item;
         const label = item === "low" ? "Low" : item === "medium" ? "Medium" : "High";
@@ -35,7 +35,7 @@ export function EffortControl() {
             type="button"
             aria-pressed={active}
             onClick={() => setModelEffort(settings.provider, settings.model, item)}
-            className={`rounded-lg px-3 text-xs font-semibold transition-colors ${active ? "bg-accent-soft text-accent" : "text-muted hover:text-ink"}`}
+            className={`rounded-lg px-2 text-xs font-semibold transition-colors sm:px-3 ${active ? "bg-accent-soft text-accent" : "text-muted hover:text-ink"}`}
           >
             {label}
           </button>
@@ -63,7 +63,7 @@ export function ModelPicker({
   return (
     <Menu
       label={
-        <span className="flex max-w-44 items-center gap-1.5 truncate text-xs font-medium">
+        <span className="flex max-w-32 items-center gap-1.5 truncate text-xs font-medium sm:max-w-44">
           <span className="truncate">{activeOption.label}</span>
         </span>
       }

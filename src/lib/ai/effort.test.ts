@@ -14,6 +14,7 @@ describe("supportsEffort", () => {
     expect(supportsEffort("google", "gemini-2.5-pro")).toBe(true);
     expect(supportsEffort("google", "gemini-3.8-flash")).toBe(true);
     expect(supportsEffort("google", "gemini-4-carbon")).toBe(true);
+    expect(supportsEffort("google", "gemini-4-neon")).toBe(true);
     expect(supportsEffort("google", "gemini-2.0-flash")).toBe(false);
     expect(supportsEffort("google", "gemini-pro-latest")).toBe(false);
 
@@ -78,6 +79,11 @@ describe("resolveLanguageModel effort", () => {
       }),
     );
     expect(resolveLanguageModel("google", "gemini-4-carbon", "high")).toEqual(
+      expect.objectContaining({
+        providerOptions: { google: { thinkingConfig: { thinkingLevel: "high", includeThoughts: true } } },
+      }),
+    );
+    expect(resolveLanguageModel("google", "gemini-4-neon", "high")).toEqual(
       expect.objectContaining({
         providerOptions: { google: { thinkingConfig: { thinkingLevel: "high", includeThoughts: true } } },
       }),

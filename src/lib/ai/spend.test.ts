@@ -45,6 +45,7 @@ describe("millsForUsage", () => {
   it("prices each provider from its own list", () => {
     expect(millsForUsage("anthropic", "claude-sonnet-4-5", { inputTokens: 0, outputTokens: 1_000_000 })).toBe(15 * MILLS_PER_DOLLAR);
     expect(millsForUsage("google", "gemini-2.5-flash", { inputTokens: 1_000_000, outputTokens: 0 })).toBe(0.3 * MILLS_PER_DOLLAR);
+    expect(millsForUsage("google", "gemini-4-neon", { inputTokens: 1_000_000, outputTokens: 1_000_000 })).toBe(18 * MILLS_PER_DOLLAR);
   });
 
   it("ignores an unknown provider", () => {

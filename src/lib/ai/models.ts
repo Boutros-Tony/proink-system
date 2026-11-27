@@ -41,6 +41,14 @@ export const MODEL_CATALOG: ModelOption[] = [
     model: "gemini-4-carbon",
   },
   {
+    id: "google:gemini-4-neon",
+    label: "Gemini 4 Neon",
+    provider: "google",
+    providerLabel: "Google",
+    tier: "premium",
+    model: "gemini-4-neon",
+  },
+  {
     id: "google:gemini-4-argon",
     label: "Gemini 4 Argon",
     provider: "google",

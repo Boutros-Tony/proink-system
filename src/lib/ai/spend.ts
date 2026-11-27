@@ -48,6 +48,7 @@ const RATES: Record<ProviderId, Rate[]> = {
   google: [
     // Introductory price through Nov 30, 2026. $4 / $20 after that.
     { prefix: "gemini-4-carbon", input: 2, output: 10 },
+    { prefix: "gemini-4-neon", input: 3, output: 15 },
     // Placeholder: Pro-tier rate until the published price is confirmed.
     { prefix: "gemini-4-argon", input: 1.25, output: 10 },
     { prefix: "gemini-3.8-flash", input: 0.3, output: 2.5 },
